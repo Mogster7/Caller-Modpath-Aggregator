@@ -1,4 +1,4 @@
-//! Macros for caller_modpath_aggregator, an overhaul of [repo](https://github.com/Shizcow/caller_modpath)
+//! Macros for caller_modpath_aggregator_functions, an overhaul of [repo](https://github.com/Shizcow/caller_modpath)
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -36,11 +36,11 @@ pub fn expose_caller_modpath(_attr: TokenStream, input: TokenStream) -> TokenStr
                 let item_fn: ItemFn = syn::parse(item.clone()).unwrap();
                 let fn_name = &item_fn.sig.ident.to_string();
 
-                caller_modpath_aggregator::append_span(env!("CARGO_CRATE_NAME"), fn_name);
+                caller_modpath_aggregator_functions::append_span(env!("CARGO_CRATE_NAME"), fn_name);
 
                 // Second compilation
-                if std::env::var(caller_modpath_aggregator::UUID_ENV_VAR_NAME).is_ok() {
-                    return caller_modpath_aggregator::generate_paths();
+                if std::env::var(caller_modpath_aggregator_functions::UUID_ENV_VAR_NAME).is_ok() {
+                    return caller_modpath_aggregator_functions::generate_paths();
                 }
             }})
                 .unwrap();

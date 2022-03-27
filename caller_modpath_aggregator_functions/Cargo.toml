@@ -1,5 +1,5 @@
 [package]
-name = "caller_modpath_aggregator"
+name = "caller_modpath_aggregator_functions"
 version = "0.1.0"
 
 [dependencies]

@@ -1,6 +1,11 @@
-[workspace]
+[package]
+name = "caller_modpath_aggregator"
+version = "0.1.0"
 
+[lib]
+
+[workspace]
 members = [
-    "caller_modpath_aggregator",
+    "caller_modpath_aggregator_functions",
     "caller_modpath_aggregator_macros",
 ]
