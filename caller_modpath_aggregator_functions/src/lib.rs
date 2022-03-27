@@ -3,6 +3,8 @@
 
 // yeah
 extern crate proc_macro;
+extern crate uuid;
+extern crate quote;
 
 #[doc(hidden)]
 pub use quote::quote;

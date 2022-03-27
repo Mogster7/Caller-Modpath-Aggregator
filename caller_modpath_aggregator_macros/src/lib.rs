@@ -1,5 +1,9 @@
 //! Macros for caller_modpath_aggregator_functions, an overhaul of [repo](https://github.com/Shizcow/caller_modpath)
 
+extern crate proc_macro;
+extern crate quote;
+extern crate syn;
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Block, ItemFn};
