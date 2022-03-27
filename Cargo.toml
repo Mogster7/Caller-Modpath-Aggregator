@@ -1,6 +1,7 @@
 [package]
 name = "caller_modpath_aggregator"
 version = "0.1.0"
+edition = "2021"
 
 [lib]
 
