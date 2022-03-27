@@ -12,5 +12,5 @@ version = "1.0.6"
 version = "1.0.23"
 features = ["full"]
 
-[dependencies.ssrc_caller_modpath]
-path = "../ssrc_caller_modpath"
+[dependencies.caller_modpath_aggregator_functions]
+path = "../caller_modpath_aggregator_functions"
