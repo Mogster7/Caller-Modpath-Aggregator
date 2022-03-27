@@ -7,9 +7,3 @@ version = "0.1.0"
 [dependencies]
 caller_modpath_aggregator_functions = { path="./caller_modpath_aggregator_functions" }
 caller_modpath_aggregator_macros = { path="./caller_modpath_aggregator_macros" }
-
-[workspace]
-members = [
-    "caller_modpath_aggregator_functions",
-    "caller_modpath_aggregator_macros",
-]
