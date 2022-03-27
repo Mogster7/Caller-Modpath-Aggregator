@@ -1,30 +1,19 @@
-//! Macros for [`caller_modpath`](https://docs.rs/caller_modpath).
+//! Macros for caller_modpath_aggregator, an overhaul of [repo](https://github.com/Shizcow/caller_modpath)
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse::Nothing, Block, ItemFn};
-/// Makes [`Span::caller_modpath()`](https://docs.rs/caller_modpath/trait.CallerModpath.html#tymethod.caller_modpath)
-/// available to the applied macro, and all functions which it calls.
-///
-/// ## Note:
-/// This can only be applied to [`#[proc_macro_attribute]`](https://doc.rust-lang.org/nightly/book/ch19-06-macros.html#procedural-macros-for-generating-code-from-attributes) functions.
-///
-/// [`#[expose_caller_modpath]`](macro@expose_caller_modpath) should go above
-/// [`#[proc_macro_attribute]`](https://doc.rust-lang.org/nightly/book/ch19-06-macros.html#procedural-macros-for-generating-code-from-attributes)
-///
-/// For an example, see the [top level documentation](https://docs.rs/caller_modpath).
+use syn::{Block, ItemFn};
+
 // prepend the setup code to the beginning of the input proc_macro
 #[proc_macro_attribute]
-pub fn expose_caller_modpath(attr: TokenStream, input: TokenStream) -> TokenStream {
-    syn::parse_macro_input!(attr as Nothing); // I take no args
-
+pub fn expose_caller_modpath(_attr: TokenStream, input: TokenStream) -> TokenStream {
     // for error reporting
     let proc_err = syn::Error::new(
         proc_macro::Span::call_site().into(),
         "#[expose_caller_modpath] can only be used on #[proc_macro_attribute] functions",
     )
-    .to_compile_error()
-    .into();
+        .to_compile_error()
+        .into();
 
     // make sure the format matches
     match syn::parse::<ItemFn>(input) {
@@ -43,13 +32,18 @@ pub fn expose_caller_modpath(attr: TokenStream, input: TokenStream) -> TokenStre
 
             // This will be placed at the beginning of the function
             let mut inject = syn::parse2::<Block>(quote! {{
-                if std::env::var(caller_modpath::UUID_ENV_VAR_NAME).is_ok() {
-                    return caller_modpath::gen_second_pass();
-                }
+                // Store the name of the function as well
+                let item_fn: ItemFn = syn::parse(item.clone()).unwrap();
+                let fn_name = &item_fn.sig.ident.to_string();
 
-                caller_modpath::gen_first_pass(env!("CARGO_CRATE_NAME"));
+                caller_modpath_aggregator::append_span(env!("CARGO_CRATE_NAME"), fn_name);
+
+                // Second compilation
+                if std::env::var(caller_modpath_aggregator::UUID_ENV_VAR_NAME).is_ok() {
+                    return caller_modpath_aggregator::generate_paths();
+                }
             }})
-            .unwrap();
+                .unwrap();
 
             // wrap everything back up and return
             let attrs = input.attrs;
@@ -62,7 +56,7 @@ pub fn expose_caller_modpath(attr: TokenStream, input: TokenStream) -> TokenStre
                     #vis #sig
             #inject
                 })
-            .into()
+                .into()
         }
     }
 }

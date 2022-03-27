@@ -1,2 +1,0 @@
-mod otherfile;
-fn main() {}

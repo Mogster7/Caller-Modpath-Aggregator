@@ -1,54 +1,12 @@
 #![feature(proc_macro_span)]
-
-//! Getting the module path of the caller within a [`#[proc_macro_attribute]`](https://doc.rust-lang.org/nightly/book/ch19-06-macros.html#procedural-macros-for-generating-code-from-attributes).
-//!
-//! This crate provides two items:
-//! - [`#[expose_caller_modpath]`](macro@expose_caller_modpath)
-//! - [`CallerModpath::caller_modpath`](CallerModpath::caller_modpath)
-//!
-//! The first makes the second available; see the documentation on each for more information.
-//!
-//! ## Example
-//!
-//! ```
-//! #[caller_modpath::expose_caller_modpath]
-//! #[proc_macro_attribute]
-//! pub fn test(_attr: TokenStream, _input: TokenStream) -> TokenStream {
-//!     let modpath: String = proc_macro::Span::caller_modpath();
-//!     // now do something with it. For example, just panic to have the compiler display the result:
-//!     panic!(
-//!         "module path of call site: {}",
-//!         modpath
-//!     );
-//! }
-//! ```
-//!
-//! ## Nightly Requirement
-//! This crate internally uses the `proc_macro_span` feature.
-//! This is only used to test the equality of two Spans.
-//! If you know how to do this without nightly, file an issue or PR on the
-//! [upstream GitHub repo](https://github.com/Shizcow/caller_modpath).
-//! Help is greatly appreciated!
-//!
-//! ## Backend
-//! This crate causes the macro invoker to call rustc on itself.
-//! [`#[expose_caller_modpath]`](macro@expose_caller_modpath) performans some setup such that on the meta-call
-//! the target macro essentially expands to
-//! [`module_path!()`](https://doc.rust-lang.org/std/macro.module_path.html)
-//! with some additional identifiers. These identifiers are read within
-//! [`CallerModpath::caller_modpath`](CallerModpath::caller_modpath), which does the rustc meta-call,
-//! parsing and returning the value.
-//!
-//! Because this crate does some terribly non-standard stuff, issues are bound to occur.
-//! If you run into something, file an issue at the
-//! [upstream GitHub repo](https://github.com/Shizcow/caller_modpath).
+//! This is an overhaul of [repo](https://github.com/Shizcow/caller_modpath).
 
 // yeah
 extern crate proc_macro;
 
-pub use caller_modpath_macros::*;
 #[doc(hidden)]
 pub use quote::quote;
+pub use quote::quote_spanned;
 
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -64,97 +22,28 @@ pub static UUID_ENV_VAR_NAME: &str =
 // A lot of this stuff is crazy because of that
 // If this was better I'd stick it in a lazy_static HashMap and call it a day but sometype needs attention
 thread_local! {
-    static MODCACHE: RwLock<Vec<(proc_macro2::Span, ResolveStatus)>> = RwLock::new(vec![]);
-}
-
-enum ResolveStatus {
-    Unresolved(&'static str), // crate name
-    Resolved(String),         // module path name
-}
-
-// This trait is the main interface for this crate
-/// Provides a way to fetch the module path of the caller.
-///
-/// ## Note:
-/// [`#[expose_caller_modpath]`](macro@expose_caller_modpath) must be placed on the parent
-/// [`#[proc_macro_attribute]`](https://doc.rust-lang.org/nightly/book/ch19-06-macros.html#procedural-macros-for-generating-code-from-attributes)
-/// to enable. [`caller_modpath`](CallerModpath::caller_modpath) may be called from children functions, so long as
-/// [`#[expose_caller_modpath]`](macro@expose_caller_modpath) is applied to the parent.
-pub trait CallerModpath {
-    /// Get the caller modpath.
-    ///
-    /// Fetching is done lazily and cahced into a static. So, the first call will be slow and subsequent
-    /// calls will be much faster.
-    fn caller_modpath() -> String;
-}
-
-impl CallerModpath for proc_macro::Span {
-    fn caller_modpath() -> String {
-        let call_site = proc_macro2::Span::call_site().unwrap();
-        // First, try to find any mention of it (it's initialized by the macro)
-        MODCACHE.with(move |m| {
-	    // overwritten and used only when required
-	    let mut need_to_write_index = None;
-	    let mut newly_resolved = None;
-	    { // this weird scope is so the mutex can be reused mutably later
-		let locked = m.read().unwrap();
-		for i in 0..locked.len() {
-                    if locked[i].0.unwrap().eq(&call_site) {
-			match locked[i].1 {
-			    ResolveStatus::Resolved(ref modpath) => {
-				// If we have calculated everything already, just return it
-				return modpath.clone();
-			    },
-			    ResolveStatus::Unresolved(cratename) => {
-				// Otherwise, calculate and continue
-				let modpath = resolve_modpath(cratename);
-				need_to_write_index = Some(i);
-				newly_resolved = Some(modpath.to_owned());
-			    },
-			};
-                    }
-		};
-	    }
-	    // If we found no mention, the user forgot to set up
-	    if need_to_write_index.is_none() {
-		panic!("Attempt to call Span::caller_modpath() without first putting #[expose_caller_modpath] on the parent #[proc_macro_attribute]!");
-	    }
-	    // Otherise, do the calculation and cache+return the result
-	    let mut write_lock = m.write().unwrap();
-	    let modpath = newly_resolved.unwrap();
-	    write_lock[need_to_write_index.unwrap()].1 = ResolveStatus::Resolved(modpath.clone());
-	    modpath
-        })
-    }
-}
-
-// I just want this available for both types
-/// This impl is for [`proc_macro2::Span`](https://docs.rs/proc-macro2/1.0.24/proc_macro2/struct.Span.html).
-/// The backend is the exact same; this is just provided for convienience.
-impl CallerModpath for proc_macro2::Span {
-    fn caller_modpath() -> String {
-        proc_macro::Span::caller_modpath()
-    }
+    // Span, crate name, caller function
+    static MODCACHE: RwLock<Vec<(proc_macro2::Span, &'static str, String)>> = RwLock::new(vec![]);
 }
 
 #[doc(hidden)]
-pub fn gen_second_pass() -> proc_macro::TokenStream {
+pub fn generate_paths() -> proc_macro::TokenStream {
     let i = proc_macro2::Ident::new(
         &format!(
             "{}_UUID_{}",
             env!("CARGO_PKG_NAME"),
-            std::env::var(UUID_ENV_VAR_NAME).unwrap()
-        ),
+            std::env::var(UUID_ENV_VAR_NAME).unwrap(),
+        ).as_str(),
         proc_macro2::Span::call_site(),
     );
     (quote! {
         static #i: &'static str = module_path!();
     })
-    .into()
+        .into()
 }
 
 #[doc(hidden)]
-pub fn gen_first_pass(client_proc_macro_crate_name: &'static str) {
+pub fn append_span(client_proc_macro_crate_name: &'static str, fn_name: &String) {
     // Make sure we aren't logging the call site twice
     let call_site = proc_macro2::Span::call_site().unwrap();
     let already_calculated = MODCACHE.with(|m| {
@@ -169,34 +58,43 @@ pub fn gen_first_pass(client_proc_macro_crate_name: &'static str) {
     if already_calculated {
         return;
     }
-    // Then just push an empty to be resolved when we actually ask for it
+
     MODCACHE.with(move |m| {
         m.write().unwrap().push((
             proc_macro2::Span::call_site(),
-            ResolveStatus::Unresolved(client_proc_macro_crate_name),
+            client_proc_macro_crate_name,
+            fn_name.clone()
         ))
     });
 }
 
-fn resolve_modpath(client_proc_macro_crate_name: &str) -> String {
+pub fn get_modpaths(client_proc_macro_crate_name: &str) -> Vec<String> {
+    let mut modpaths: Vec<String> = vec![];
+
+    // Get entrypoint for this crate
     let entry_p = get_entrypoint();
 
-    let uuid_string = Uuid::new_v4().to_string().replace("-", "_");
-
-    let chosen_dir = find_lib_so(&client_proc_macro_crate_name);
-
+    // Get the library binary
+    let chosen_dir = find_lib_binary(&client_proc_macro_crate_name);
     let liblink_path = format!("{}={}", client_proc_macro_crate_name, chosen_dir);
 
+    // Supply arguments for second compilation
     let rustc_args = vec![
         "-Z",
+        "unpretty=expanded",
+        "-Z",
         "unstable-options",
-        "--pretty=expanded",
+        "--edition=2021",
         "--color=never",
         "--extern",
         &liblink_path,
         entry_p.to_str().unwrap(),
     ];
 
+    // Create the UUID for splitting our compilation output
+    let uuid_string: String = Uuid::new_v4().to_string().replace("-", "_");
+
+    // Compile the crate while generating the module paths (gen_second_pass)
     let proc = std::process::Command::new("rustc")
         .current_dir(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .args(&rustc_args)
@@ -204,14 +102,38 @@ fn resolve_modpath(client_proc_macro_crate_name: &str) -> String {
         .output()
         .expect("failed to execute a second pass of rustc");
 
-    String::from_utf8_lossy(&proc.stdout).split(&uuid_string)
-        .nth(1)
-        .unwrap_or_else(|| panic!("Failed to find internal UUID; rustc metacall probably faliled. Called as `rustc {}`. Stderr:\n{}", rustc_args.join(" "), String::from_utf8_lossy(&proc.stderr)))
-        .chars()
-        .skip_while(|c| c != &'"')
-        .skip(1)
-        .take_while(|c| c != &'"')
-        .collect()
+    // Split the output by our environment variable (find each module path reference)
+    let string = String::from_utf8_lossy(&proc.stdout);
+    let split_string = string.split(&uuid_string);
+
+    MODCACHE.with(|m| {
+        // If this is our crate, increase number of module paths
+        for (i, e) in m.read().unwrap().iter().enumerate() {
+            if e.1 == client_proc_macro_crate_name {
+                // Hunt down the module path per UUID found
+                let mut split = split_string.clone();
+                let mut path: String = split.nth(i + 1)
+                    .unwrap_or_else(|| panic!("Failed to find internal UUID; rustc metacall probably faliled. Called as `rustc {}`. Stderr:\n{}", rustc_args.join(" "), String::from_utf8_lossy(&proc.stderr)))
+                    .chars()
+                    .skip_while(|c| c != &'"')
+                    .skip(1)
+                    .take_while(|c| c != &'"')
+                    .collect();
+
+                // Skip the root module
+                let root_module = path.find("::").unwrap();
+                path = path.chars().skip(root_module + 2).collect();
+
+                // Add the function
+                modpaths.push(
+                    path + "::" + e.2.as_str()
+                );
+            }
+        }
+    });
+
+
+    return modpaths;
 }
 
 fn get_entrypoint() -> PathBuf {
@@ -232,7 +154,7 @@ fn get_entrypoint() -> PathBuf {
     }
 }
 
-fn find_lib_so(libname: &str) -> String {
+fn find_lib_binary(libname: &str) -> String {
     let target_path = std::env::current_dir()
         .expect("Could not get current dir from env")
         .join("target")
@@ -242,17 +164,23 @@ fn find_lib_so(libname: &str) -> String {
             "release"
         });
 
+    let lib_extension = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
+
     // need to look in two places:
     // target/{}/deps/ for crate dependencies
     let dep_p = target_path
         .join("deps")
-        .join(format!("lib{}-*.so", libname))
+        .join(format!("lib{}-*.{}", libname, lib_extension))
         .into_os_string();
 
     let dep_str = dep_p.to_string_lossy();
 
-    // and target/{}/ for workspace targets
-    let t_p = target_path.join(format!("lib{}.so", libname));
+    // and target/{}/ for workspace target
+    let t_p = target_path.join(format!("lib{}.{}", libname, lib_extension));
 
     let mut file_candidates: Vec<_> = glob::glob(&dep_str)
         .expect("Failed to read library glob pattern")

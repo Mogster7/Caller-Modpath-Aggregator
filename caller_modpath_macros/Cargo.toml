@@ -1,18 +1,16 @@
 [package]
-name = "caller_modpath_macros"
-version = "0.1.1"
-authors = ["Shizcow <pohl.devin@gmail.com>"]
-edition = "2018"
-description = "proc_macros for caller_modpath"
-license = "MIT OR Apache-2.0"
-readme = "../README.md"
-repository = "https://github.com/Shizcow/caller_modpath"
-keywords = ["module_path", "modpath"]
-categories = ["development-tools"]
-
-[dependencies]
-syn = {version = "1.0.23", features = ["full"]}
-quote = "1.0.6"
+name = "caller_modpath_aggregator_macros"
+version = "0.1.0"
 
 [lib]
 proc-macro = true
+
+[dependencies.quote]
+version = "1.0.6"
+
+[dependencies.syn]
+version = "1.0.23"
+features = ["full"]
+
+[dependencies.ssrc_caller_modpath]
+path = "../ssrc_caller_modpath"

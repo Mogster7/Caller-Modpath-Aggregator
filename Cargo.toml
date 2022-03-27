@@ -1,8 +1,6 @@
 [workspace]
 
 members = [
-    "caller_modpath",
-    "caller_modpath_macros",
-    "examples/backend",
-    "examples/invoke",
+    "caller_modpath_aggregator",
+    "caller_modpath_aggregator_macros",
 ]
